@@ -1,5 +1,7 @@
 from skimage.io import imread_collection, imshow, imsave, use_plugin
+from scipy.spatial.distance import cdist
 from skimage.util import img_as_float
+from skimage.transform import rescale
 from scipy.signal import correlate2d
 from matplotlib import pyplot as plt
 from typing import List
@@ -21,19 +23,18 @@ def energy_min_compose(imgs: List[np.ndarray]):
 
     consensus3 = np.stack([consensus, consensus, consensus], axis=2)
     composite[consensus3] = imgs_avg[consensus3]
-    imsave('cut_consensus.png', composite)
+    # imsave('cut_consensus.png', composite)
     num_dif = np.sum(np.sum(~consensus))
 
     while num_dif > 0:
         have_neighbors = correlate2d(consensus, np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]]), mode='same')
-        boundary = (~consensus) & have_neighbors
-        boundary_im = composite
-        boundary_im[np.stack([boundary, boundary, boundary], axis=2)] = 1
-        imsave('cut_boundaries.png', boundary_im)
+        boundary = (~consensus) & have_neighbors.astype(bool)
         sel_i = ii[boundary]
         sel_j = jj[boundary]
+        indices = np.arange(len(sel_i))
+        np.random.shuffle(indices)
 
-        for n in range(len(sel_i)):
+        for n in indices:
             i = sel_i[n]
             j = sel_j[n]
             neighbors = []
@@ -46,14 +47,25 @@ def energy_min_compose(imgs: List[np.ndarray]):
                 neighbors.append(imgs_avg[i, j - 1, :])
             if j < (width - 1) and consensus[i, j + 1]:
                 neighbors.append(imgs_avg[i, j + 1, :])
+            if i > 0 and j > 0 and consensus[i - 1, j - 1]:
+                neighbors.append(imgs_avg[i - 1, j - 1])
+            if i > 0 and j < (width - 1) and consensus[i - 1, j + 1]:
+                neighbors.append(imgs_avg[i - 1, j + 1])
+            if i < (height - 1) and j > 0 and consensus[i + 1, j - 1]:
+                neighbors.append(imgs_avg[i + 1, j - 1])
+            if i < (height - 1) and j < (width - 1) and consensus[i + 1, j + 1]:
+                neighbors.append(imgs_avg[i + 1, j + 1])
 
             neighbors = np.stack(neighbors)
-            distances = np.apply_along_axis(lambda x: np.sum(np.linalg.norm(x - neighbors, axis=1)), 1,
-                                            imgs_stack[i, j, :, :].T)
+            distances_euclid = np.sum(cdist(neighbors, imgs_stack[i, j, :, :].T, 'euclidean'), axis=0)
+            distances_cosine = np.sum(cdist(neighbors, imgs_stack[i, j, :, :].T, 'cosine'), axis=0)
+            distances = distances_euclid + distances_cosine
+
             composite[i, j, :] = imgs_stack[i, j, :, np.argmin(distances)]
             consensus[i, j] = True
             num_dif -= 1
 
+        # consensus = consensus | boundary
         print(num_dif)
         # imsave('cut_{}.png'.format(num_dif), composite)
 
@@ -79,15 +91,29 @@ def main():
     # collection = imread_collection('shibuya/*.png')
     # imgs = [img_as_float(img[189:616, 635:1307]) for img in collection[:5]]
 
-    collection = imread_collection('photos/DJI/cut/*.JPG')
-    imgs = [img_as_float(collection[i]) for i in range(4, 8)]
+    # collection = imread_collection('photos/DJI/cut/*.JPG')
+    # imgs = [img_as_float(collection[i]) for i in range(4, 8)]
 
     # for some reason this reads duplicate images
     # collection = imread_collection('photos/DJI/cut/original/*.JPG')
     # imgs = [img_as_float(collection[i]) for i in (8, 10, 12, 14)]
 
-    # composite = median_stack(imgs)
-    composite = energy_min_compose(imgs)
+    # collection = imread_collection('photos/tripod/hammerschlag/*.jpg')
+    # imgs = [rescale(img_as_float(collection[i]), 0.5) for i in range(3)]
+
+    # collection = imread_collection('photos/tripod/doherty/*.jpg')
+    # imgs = [rescale(img_as_float(collection[i]), 0.5) for i in range(4)]
+
+    # collection = imread_collection('photos/tripod/cohon/*.jpg')
+    # imgs = [rescale(img_as_float(img), 0.3) for img in collection]
+
+    collection = imread_collection('photos/tripod/hunt/*.jpg')
+    imgs = [rescale(img_as_float(collection[i]), 0.3) for i in range(4)]
+
+    composite_median = median_stack(imgs)
+    imsave('hunt_median.png', composite_median)
+    composite_en_min = energy_min_compose(imgs)
+    imsave('hunt_en_min_euclid+cosine.png', composite_en_min)
 
     # imshow(composite)
     # plt.show()
