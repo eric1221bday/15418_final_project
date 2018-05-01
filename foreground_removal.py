@@ -1,4 +1,4 @@
-from skimage.io import imread_collection, imshow, imsave, use_plugin
+from skimage.io import imread_collection, imshow, imsave, use_plugin, imread
 from scipy.spatial.distance import cdist
 from skimage.util import img_as_float
 from skimage.transform import rescale
@@ -27,8 +27,8 @@ def energy_min_compose(imgs: List[np.ndarray]):
     num_dif = np.sum(np.sum(~consensus))
 
     while num_dif > 0:
-        have_neighbors = correlate2d(consensus, np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]]), mode='same')
-        boundary = (~consensus) & have_neighbors.astype(bool)
+        have_neighbors = correlate2d(consensus, np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]]), mode='same')
+        boundary = (~consensus) & (have_neighbors > 3)
         sel_i = ii[boundary]
         sel_j = jj[boundary]
         indices = np.arange(len(sel_i))
@@ -40,34 +40,34 @@ def energy_min_compose(imgs: List[np.ndarray]):
             neighbors = []
 
             if i > 0 and consensus[i - 1, j]:
-                neighbors.append(imgs_avg[i - 1, j, :])
+                neighbors.append(composite[i - 1, j, :])
             if i < (height - 1) and consensus[i + 1, j]:
-                neighbors.append(imgs_avg[i + 1, j, :])
+                neighbors.append(composite[i + 1, j, :])
             if j > 0 and consensus[i, j - 1]:
-                neighbors.append(imgs_avg[i, j - 1, :])
+                neighbors.append(composite[i, j - 1, :])
             if j < (width - 1) and consensus[i, j + 1]:
-                neighbors.append(imgs_avg[i, j + 1, :])
+                neighbors.append(composite[i, j + 1, :])
             if i > 0 and j > 0 and consensus[i - 1, j - 1]:
-                neighbors.append(imgs_avg[i - 1, j - 1])
+                neighbors.append(composite[i - 1, j - 1])
             if i > 0 and j < (width - 1) and consensus[i - 1, j + 1]:
-                neighbors.append(imgs_avg[i - 1, j + 1])
+                neighbors.append(composite[i - 1, j + 1])
             if i < (height - 1) and j > 0 and consensus[i + 1, j - 1]:
-                neighbors.append(imgs_avg[i + 1, j - 1])
+                neighbors.append(composite[i + 1, j - 1])
             if i < (height - 1) and j < (width - 1) and consensus[i + 1, j + 1]:
-                neighbors.append(imgs_avg[i + 1, j + 1])
+                neighbors.append(composite[i + 1, j + 1])
 
             neighbors = np.stack(neighbors)
-            distances_euclid = np.sum(cdist(neighbors, imgs_stack[i, j, :, :].T, 'euclidean'), axis=0)
-            distances_cosine = np.sum(cdist(neighbors, imgs_stack[i, j, :, :].T, 'cosine'), axis=0)
-            distances = distances_euclid + distances_cosine
+            # distances_euclid = np.sum(cdist(neighbors, imgs_stack[i, j, :, :].T, 'euclidean'), axis=0)
+            # distances_cosine = np.sum(cdist(neighbors, imgs_stack[i, j, :, :].T, 'cosine'), axis=0)
+            # distances = distances_euclid + distances_cosine
+            distances = np.sum(cdist(neighbors, imgs_stack[i, j, :, :].T, 'minkowski', p=1), axis=0)
 
             composite[i, j, :] = imgs_stack[i, j, :, np.argmin(distances)]
-            consensus[i, j] = True
             num_dif -= 1
 
-        # consensus = consensus | boundary
+        consensus = consensus | boundary
         print(num_dif)
-        # imsave('cut_{}.png'.format(num_dif), composite)
+        # imsave('hunt/hunt_{}.png'.format(num_dif), composite)
 
     return composite
 
@@ -83,6 +83,17 @@ def median_stack(imgs: List):
     composite[:, :, 2] = np.median(imgs_b, axis=0)
 
     return composite
+
+
+def total_error(folder: str, truth_path: str):
+    use_plugin('matplotlib')
+    results = imread_collection(folder + '/*.png')
+    imgs = [img_as_float(img) for img in results]
+    truth = rescale(imread(truth_path), 0.3)
+    height, width, channels = truth.shape
+
+    for img in imgs:
+        print(np.sum(np.linalg.norm(np.reshape(truth, [width*height, channels]) - np.reshape(img, [width*height, channels]), axis=1)))
 
 
 def main():
@@ -107,16 +118,24 @@ def main():
     # collection = imread_collection('photos/tripod/cohon/*.jpg')
     # imgs = [rescale(img_as_float(img), 0.3) for img in collection]
 
-    collection = imread_collection('photos/tripod/hunt/*.jpg')
-    imgs = [rescale(img_as_float(collection[i]), 0.3) for i in range(4)]
+    # collection = imread_collection('photos/tripod/hunt/*.jpg')
+    # imgs = [rescale(img_as_float(collection[i]), 0.3) for i in range(4)]
 
-    composite_median = median_stack(imgs)
-    imsave('hunt_median.png', composite_median)
-    composite_en_min = energy_min_compose(imgs)
-    imsave('hunt_en_min_euclid+cosine.png', composite_en_min)
+    # collection = imread_collection('photos/tripod_2/forbes/IMG*.jpg')
+    # imgs = [rescale(img_as_float(img), 0.3) for img in collection[5:]]
+
+    # collection = imread_collection('photos/tripod_2/hammerschlag_2/IMG*.jpg')
+    # imgs = [rescale(img_as_float(img), 0.3) for img in collection]
+    #
+    # composite_median = median_stack(imgs)
+    # imsave('forbes_median.png', composite_median)
+    # composite_en_min = energy_min_compose(imgs)
+    # imsave('forbes_en_min_1_norm.png', composite_en_min)
 
     # imshow(composite)
     # plt.show()
+
+    total_error('forbes', 'photos/tripod_2/forbes/ground_truth.jpg')
 
 
 if __name__ == '__main__':
